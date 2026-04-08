@@ -44,7 +44,7 @@ failure modes of thermodynamic encoding:
 | D | **Adaptive Thermal Governor** | P-controller entropy thermostat ← primary contribution |
 | E | Scale-Invariant Field Governor | Sequence-adaptive field scaling |
 | F | Probability-Biased Initialization | Warm start from attention distribution |
-| G | Contrast Amplification | Noise-aware encoding gain (Fix G) |
+| G | Contrast Amplification | Noise-aware encoding gain |
 
 Fix D is the primary original contribution — a closed-loop proportional controller
 that drives sampler output entropy toward the target entropy of the input attention
@@ -147,7 +147,6 @@ validation is the next step.
 - ✅ Llama 3.2-3B cross-architecture validation complete
 - ✅ Regime characterization complete — Shannon-consistent operating envelope
 - ✅ Fix G (contrast amplification) implemented and validated — v5.10/v5.11
-- 🔄 Full SNR sweep running (Colab, April 2026)
 - ⏳ Physical TSU hardware validation pending
 
 ---
@@ -165,7 +164,6 @@ characterized.
 
 ## Contact
 
-**Paul W. Shaver** — Independent Inventor  
 US Military Veteran (25N — Network Systems Operator)  
 USPTO Provisional Patent No. 64/019,999
 
