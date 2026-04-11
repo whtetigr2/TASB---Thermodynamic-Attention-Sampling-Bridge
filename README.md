@@ -6,18 +6,6 @@ TASB encodes transformer attention as an Ising energy-based model, samples it wi
 
 This is already producing measurable value, not just conceptual alignment: in the current GPT-2 validation sweep, TASB preserved the vanilla next token on **7/7 tested sequence lengths**, passed the causal mask on **84/84 head checks**, reached aggregate output cosine as high as **0.916**, and beat naive **uniform** and **shuffle** baselines on the strongest tested in-envelope and mid-SNR prompts.
 
-## What TASB Does
-
-At a high level:
-
-1. Read a frozen attention head from a live transformer forward pass.
-2. Convert that softmax attention row into an Ising EBM.
-3. Sample the EBM with Gibbs chains using `thrml`.
-4. Reconstruct the context vector with the transformer's own value and output projection matrices.
-5. Return the modified attention output to the model.
-
-This makes TASB a compatibility layer around existing transformers, not a retrained architecture.
-
 ## Why This Matters
 
 - No retraining
@@ -26,28 +14,53 @@ This makes TASB a compatibility layer around existing transformers, not a retrai
 - Structured advantage over naive public baselines
 - Regime-aware behavior with a measured operating envelope
 
-## Current Position
+## What TASB Is
 
-What is supported by the current code and experiments:
+TASB is a compatibility layer for frozen transformers. It does not retrain the model, replace the language head, or redefine the network. It intercepts attention during inference, converts the attention distribution into an Ising-style energy-based model, samples that model with `thrml`, and reconstructs the original attention pathway back into the live forward pass.
 
-- GPT-2 bridge implementation with live hook-based replacement
-- Ising encoding and sampling via Extropic's public `thrml` library
-- empirical validation across multiple prompt regimes and sequence lengths
-- gating logic for bypassing or blending in fragile regimes
-- modular split between hardware-faithful core and shell logic
+At a high level:
 
-What is **not** claimed as complete:
+1. Read a frozen attention head from a live transformer forward pass.
+2. Convert the softmax attention row into an Ising EBM.
+3. Sample that EBM with Gibbs chains through `thrml`.
+4. Reconstruct the context vector with the transformer's own value and output projection matrices.
+5. Return the modified attention output to the model.
 
-- physical TSU hardware validation
-- a formal Shannon channel-capacity proof
-- an exact implementation of Kim's softmax/Boltzmann correspondence
-- proof that all heuristics transfer unchanged to silicon
+The result is not a new model family. It is a bridge between existing transformer inference and a thermodynamic sampling substrate.
+
+## What Has Been Demonstrated
+
+Current evidence supports a clear, narrower claim:
+
+- TASB can preserve next-token behavior in meaningful tested regimes.
+- TASB can outperform naive `uniform` and `shuffle` baselines where structured encoding matters.
+- TASB has a measurable operating envelope rather than a vague "works everywhere" story.
+- TASB benefits from gating and fallback logic in fragile decision-boundary regimes.
+
+That is already a real result. It is stronger and more credible than claiming universal exactness before hardware validation is complete.
+
+## Key Validation Points
+
+From the current GPT-2 validation and sweep runs:
+
+- `7/7` token matches across the tested final validation sequence lengths
+- `84/84` causal-mask passes in the per-head validation sweep
+- aggregate cosine up to `0.916`
+- bridge KL below both `uniform` and `shuffle` on the strongest tested in-envelope and mid-SNR prompts
+- clear regime split between stable prompts and uncertainty-sensitive prompts
+
+Examples from the recent runs:
+
+- In-envelope prompt (`seq_len=18`): bridge KL `0.021751` vs uniform `0.022329` vs shuffle `0.064136`
+- Mid-SNR prompt (`seq_len=8`): bridge KL `0.067253` vs uniform `0.069793` vs shuffle `0.181185`
+
+Those are the kinds of comparisons that matter publicly, because they show value against known baselines rather than only against theory.
 
 ## Theory, Carefully Stated
 
-Kim (2026) gives the key motivation: scaled dot-product softmax attention has a formal correspondence to canonical-ensemble statistics. TASB starts from that correspondence.
+Kim (2026) provides the motivating correspondence: scaled dot-product softmax attention has a formal relationship to canonical-ensemble statistics. TASB starts from that correspondence.
 
-But TASB is not just a direct transcription of that result. The current bridge adds empirical engineering heuristics to make the sampler behave well in practice, including:
+But TASB is not just a direct transcription of Kim's result. The current bridge adds practical engineering heuristics to make the sampler behave well under real finite-budget conditions, including:
 
 - sparse attention-weighted couplings
 - entropy-calibrated beta selection
@@ -59,80 +72,92 @@ But TASB is not just a direct transcription of that result. The current bridge a
 
 So the accurate description is:
 
-TASB is an approximation scheme, grounded in the softmax/Boltzmann correspondence, tuned to preserve attention-like behavior on a thermodynamic sampling substrate.
+**TASB is an approximation scheme, grounded in the softmax/Boltzmann correspondence, tuned to preserve attention-like behavior on a thermodynamic sampling substrate.**
 
-## Why `thrml` Matters Here
+That framing is both stronger and safer than overstating exact equivalence where the current implementation clearly includes additional control logic.
+
+## Why `thrml` Is Central
 
 TASB intentionally keeps Extropic's `thrml` sampler as the substrate of record.
 
-That matters because the project is not only about probabilistic modeling elegance. It is about preserving the sampling semantics most closely aligned with the target thermodynamic hardware direction. For that reason, the code treats the `thrml` call path as hardware-faithful core infrastructure and pushes optimization work into the surrounding shell.
+That matters because the project is not only about expressing a probabilistic model elegantly. It is about preserving the sampling semantics most closely aligned with the target thermodynamic hardware direction. For that reason:
 
-## Repository Structure
+- the `thrml` path is treated as hardware-faithful core infrastructure
+- most optimization work is pushed into the shell around that core
+- diagnostics, gating, testing, and sweep logic are designed to be simplified without rewriting the sampler substrate
 
-Core files:
+This is a deliberate design choice, not an implementation accident.
 
-- `bridge_core.py`: hardware-faithful Ising encoding and `thrml` sampler path
-- `bridge_diagnostics.py`: fidelity and analysis metrics
-- `bridge_gating.py`: confidence-aware gating and acceptance logic
-- `tsu_attention_bridge_v5_12.py`: integrated bridge implementation
-- `tsu_v512_gating_test.py`: comparison harness for v5.11 vs v5.12 gating behavior
+## Current Scope
 
-Design boundary:
+What the current code and experiments support:
 
-- `bridge_core.py` is the place to preserve sampler fidelity.
-- diagnostics, gating, testing, sweep logic, and performance work belong outside the core whenever possible.
+- GPT-2 bridge implementation with live hook-based replacement
+- Ising encoding and sampling via Extropic's public `thrml` library
+- empirical validation across multiple prompt regimes and sequence lengths
+- modular split between sampler core, diagnostics, and gating logic
+- confidence-aware gating for fragile regimes
 
-## Empirical Results
+What is not claimed as complete:
 
-So far, the project supports a narrower but still meaningful claim:
+- physical TSU hardware validation
+- a formal Shannon channel-capacity proof
+- an exact end-to-end implementation of Kim's softmax/Boltzmann correspondence
+- proof that every current heuristic transfers unchanged to silicon
 
-- the bridge can preserve next-token behavior well in some regimes
-- it performs best in an intermediate operating envelope
-- uncertain prompts are much more fragile and need gating or fallback
-- the bridge is better described as regime-dependent than universally exact
+## Why Gating Exists
 
-That is a stronger and more defensible story than claiming blanket equivalence across all regimes.
+The newer gating work was added for a simple reason: attention fidelity metrics alone were not enough.
 
-## What the Gating Layer Is For
-
-The v5.12 gating work exists because attention fidelity metrics alone were not enough. In ambiguous prompts, small attention perturbations can flip the final token even when KL or cosine still look reasonable.
+In ambiguous prompts, small attention perturbations can flip the final token even when KL or cosine still look reasonable. That means a bridge that performs well in stable regimes still needs protection when the decision boundary is flat.
 
 The gating layer therefore tries to:
 
-- bypass the bridge when the decision boundary is too fragile
+- bypass the bridge when the token decision is too fragile
 - blend bridge and vanilla behavior in medium-risk cases
 - reject harmful outputs before committing them
 
-This is a practical control layer around the sampler, not part of the `thrml` core itself.
+This is control logic around the sampler, not a claim that the sampler is universally safe in every regime.
 
-## What This Repo Is Best For
+## Where TASB Looks Strongest
 
-This repo is useful if you are interested in:
+TASB currently looks strongest when:
+
+- the prompt sits inside the measured operating envelope
+- the model decision is not razor-thin
+- the bridge is compared against public naive baselines
+- output preservation matters more than exact full-distribution identity
+
+That is a good place to be. It means the project already has a concrete "works here, degrades here, needs gating here" story instead of a hand-wavy demo-only story.
+
+## What This Repo Is For
+
+This repo is most relevant if you care about:
 
 - thermodynamic or probabilistic hardware for inference
 - zero-retraining compatibility layers for frozen transformers
 - attention-as-energy-model experiments
-- bridging software experiments to a future sampling hardware substrate
+- software bridges to future sampling hardware
 
-It is less useful if you are looking for:
+It is less relevant if you are looking for:
 
 - a polished production inference runtime
-- a proof that transformer inference has already been ported to physical TSU hardware
-- a finished public benchmark suite
+- proof that transformer inference has already been deployed on physical TSU hardware
+- a finished public benchmark suite with broad model coverage
 
 ## Roadmap
 
 Near-term:
 
-- finish wiring the modular shell around the fixed `thrml` core
+- finish wiring the modular shell cleanly around the fixed `thrml` core
 - speed up sweeps and gating tests by using true lean-path execution
-- add better run-time observability for long `thrml` jobs
+- improve observability for long `thrml` runs
 
 Next:
 
 - broader model validation
 - cleaner benchmark scripts and result summaries
-- stronger public documentation of operating envelope and failure modes
+- sharper documentation of the operating envelope and failure modes
 
 Long-term:
 
@@ -148,6 +173,6 @@ Long-term:
 
 Research project. Active development. Hardware validation pending.
 
-If you are reading this as a technical reviewer, the safest summary is:
+If you are reading this as a technical reviewer, the safest one-line summary is:
 
-TASB is a promising experimental bridge that preserves transformer behavior in meaningful regimes, using a thermodynamic sampling substrate, with empirical evidence in software and careful caveats around what has and has not yet been proven.
+**TASB is a working experimental bridge that already preserves transformer behavior in meaningful regimes, uses a thermodynamic sampling substrate directly, and has empirical evidence strong enough to justify serious follow-on validation.**
